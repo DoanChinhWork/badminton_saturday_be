@@ -6,7 +6,12 @@ const authMiddleware = require('../middleware/authMiddleware');
 // Public route
 router.get('/', tournamentController.getTournament);
 
-// Admin routes
+// Admin season management routes
+router.post('/seasons', authMiddleware, tournamentController.createSeason);
+router.put('/seasons/:id', authMiddleware, tournamentController.updateSeasonInfo);
+router.delete('/seasons/:id', authMiddleware, tournamentController.deleteSeason);
+
+// Admin / Scorer tournament action routes
 router.post('/pair-teams', authMiddleware, tournamentController.pairTeamsRandomly);
 router.put('/teams', authMiddleware, tournamentController.updateTeams);
 router.post('/generate-schedule', authMiddleware, tournamentController.generateGroupSchedule);

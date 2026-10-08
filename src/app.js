@@ -3,6 +3,8 @@ const cors = require('cors');
 const connectDB = require('./config/db');
 const configureRoutes = require('./routes/index');
 const config = require('./config');
+const bcrypt = require('bcryptjs');
+const Admin = require('./models/Admin');
 
 const app = express();
 
@@ -32,7 +34,27 @@ app.use((err, req, res, next) => {
 // Start server
 const PORT = config.PORT || 5000;
 
-connectDB().then(() => {
+connectDB().then(async () => {
+  // Ensure scorer account admin/12345678 exists
+  try {
+    const existingScorer = await Admin.findOne({ username: 'admin' });
+    if (!existingScorer) {
+      const hashedPassword = await bcrypt.hash('12345678', 12);
+      await Admin.create({
+        username: 'admin',
+        password: hashedPassword,
+        name: 'Trọng Tài Tỉ Số',
+        role: 'scorer'
+      });
+      console.log('✅ Auto-provisioned scorer account: admin / 12345678');
+    } else if (existingScorer.role !== 'scorer') {
+      existingScorer.role = 'scorer';
+      await existingScorer.save();
+    }
+  } catch (err) {
+    console.error('⚠️ Auto-provision scorer error:', err.message);
+  }
+
   app.listen(PORT, () => {
     console.log(`🏸 Server is running on port ${PORT}`);
     console.log(`📡 API: http://localhost:${PORT}/api`);

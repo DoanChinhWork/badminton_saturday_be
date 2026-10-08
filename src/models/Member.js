@@ -57,6 +57,10 @@ const MemberSchema = new mongoose.Schema({
     type: Number,
     default: 0
   },
+  customSpinsPerWeek: {
+    type: Number,
+    default: null
+  },
   lastSpinDate: {
     type: Date
   }

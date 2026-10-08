@@ -22,6 +22,9 @@ const feeConfigController = {
   // Update the configuration (Admin only)
   updateLatest: async (req, res) => {
     try {
+      if (!req.user || req.user.role !== 'admin') {
+        return res.status(403).json({ message: 'Chỉ Admin mới có quyền cập nhật thông báo phí' });
+      }
       const { date, courtFee, shuttleFee } = req.body;
 
       if (!date || !courtFee || !shuttleFee) {

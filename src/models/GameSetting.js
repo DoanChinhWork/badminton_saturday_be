@@ -10,6 +10,11 @@ const gameSettingSchema = new mongoose.Schema({
     type: String,
     enum: ['wheel', 'cards', 'boxes'],
     default: 'wheel'
+  },
+  spinsPerWeek: {
+    type: Number,
+    default: 1,
+    min: 1
   }
 }, {
   timestamps: true

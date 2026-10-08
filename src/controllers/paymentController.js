@@ -20,13 +20,14 @@ const config = require('../config');
  * `odds: null` means "whatever probability is left over".
  */
 const LUCKY_PRIZES = [
+  { id: 'turn1', label: '+1 Lượt chơi', short: '+1 Lượt', kind: 'turn', value: 1, odds: 0.18 }, // 18% (Nhiều thứ 2)
   { id: 'cash1', label: '10.000đ', short: '10K', kind: 'cash', value: 10000, odds: 0.01 }, // 1%
-  { id: 'cash2', label: '2.000đ', short: '2K', kind: 'cash', value: 2000, odds: 0.15 }, // 15%
-  { id: 'cash3', label: '15.000đ', short: '15K', kind: 'cash', value: 15000, odds: 0.005 }, // 0.5%
-  { id: 'cash4', label: '4.000đ', short: '4K', kind: 'cash', value: 4000, odds: 0.04 }, // 4%
-  { id: 'cash5', label: '5.000đ', short: '5K', kind: 'cash', value: 5000, odds: 0.03 }, // 3%
-  { id: 'half', label: 'Giảm 50%', short: '50%', kind: 'percent', value: 50, odds: 0.015 }, // 1.5%
-  { id: 'none', label: 'Chúc bạn may mắn lần sau', short: 'Lần sau', kind: 'none', value: 0, odds: null }
+  { id: 'cash2', label: '2.000đ', short: '2K', kind: 'cash', value: 2000, odds: 0.10 }, // 10%
+  { id: 'cash3', label: '15.000đ', short: '15K', kind: 'cash', value: 15000, odds: 0.001 }, // 0.1% (Jackpot)
+  { id: 'cash4', label: '4.000đ', short: '4K', kind: 'cash', value: 4000, odds: 0.035 }, // 3.5%
+  { id: 'cash5', label: '5.000đ', short: '5K', kind: 'cash', value: 5000, odds: 0.02 }, // 2%
+  { id: 'half', label: 'Giảm 50%', short: '50%', kind: 'percent', value: 50, odds: 0.004 }, // 0.4%
+  { id: 'none', label: 'Chúc bạn may mắn lần sau', short: 'Lần sau', kind: 'none', value: 0, odds: null } // 65% (Cao nhất)
 ];
 
 /** Never discount a bill down to zero — VietQR needs a payable amount. */
@@ -68,7 +69,7 @@ const drawPrize = (amountDue) => {
 };
 
 const discountFor = (prize, amountDue) => {
-  if (prize.kind === 'none') return 0;
+  if (prize.kind === 'none' || prize.kind === 'turn') return 0;
   const raw =
     prize.kind === 'percent'
       ? Math.round((amountDue * prize.value) / 100 / 1000) * 1000
@@ -166,7 +167,7 @@ const resolveActiveGame = async () => {
   try {
     let setting = await GameSetting.findOne();
     if (!setting) {
-      setting = await GameSetting.create({ mode: 'auto', manualGame: 'wheel' });
+      setting = await GameSetting.create({ mode: 'auto', manualGame: 'wheel', spinsPerWeek: 1 });
     }
     const weekNo = getWeekNumber(new Date());
     const autoGame = GAME_LIST[weekNo % 3];
@@ -174,6 +175,7 @@ const resolveActiveGame = async () => {
     return {
       mode: setting.mode,
       manualGame: setting.manualGame,
+      spinsPerWeek: setting.spinsPerWeek || 1,
       activeGame,
       weekNo,
       gameInfo: GAME_CATALOG[activeGame] || GAME_CATALOG.wheel
@@ -183,6 +185,7 @@ const resolveActiveGame = async () => {
     return {
       mode: 'auto',
       manualGame: 'wheel',
+      spinsPerWeek: 1,
       activeGame: 'wheel',
       weekNo: 1,
       gameInfo: GAME_CATALOG.wheel
@@ -210,6 +213,14 @@ const paymentController = {
       const baseAmount = draw?.originalAmountDue || member.amountDue;
       const gameData = await resolveActiveGame();
 
+      const now = new Date();
+      if (!member.lastSpinDate || !isSameWeek(member.lastSpinDate, now)) {
+        member.spinCount = 0;
+      }
+      const maxSpins = member.customSpinsPerWeek || gameData.spinsPerWeek || 1;
+      const spinCount = member.spinCount || 0;
+      const remainingSpins = Math.max(0, maxSpins - spinCount);
+
       res.status(200).json({
         success: true,
         data: {
@@ -221,13 +232,16 @@ const paymentController = {
           },
           payment: buildPayment(member),
           lucky: {
-            gameType: gameData.activeGame,
-            gameInfo: gameData.gameInfo,
+            gameType: draw?.gameType || gameData.activeGame,
+            gameInfo: GAME_CATALOG[draw?.gameType || gameData.activeGame] || gameData.gameInfo,
             weekNo: gameData.weekNo,
             mode: gameData.mode,
+            maxSpins,
+            spinCount,
+            remainingSpins,
             prizes: publicPrizes(baseAmount),
             halfMaxAmount: HALF_MAX_AMOUNT,
-            spun: Boolean(draw),
+            spun: Boolean(spinCount >= maxSpins),
             cancelled: Boolean(draw && draw.cancelled),
             result:
               draw && !draw.cancelled
@@ -263,11 +277,16 @@ const paymentController = {
         member.spinCount = 0;
       }
 
-      if (member.spinCount >= 1) {
+      const gameData = await resolveActiveGame();
+      const maxSpins = member.customSpinsPerWeek || gameData.spinsPerWeek || 1;
+
+      if (member.spinCount >= maxSpins) {
         return res.status(200).json({
           success: true,
           data: {
-            outOfTurns: true
+            outOfTurns: true,
+            maxSpins,
+            spinCount: member.spinCount
           }
         });
       }
@@ -290,9 +309,17 @@ const paymentController = {
         });
       }
 
-      const gameData = await resolveActiveGame();
+      const chosenGame = req.body?.gameType && ['wheel', 'cards', 'boxes'].includes(req.body.gameType)
+        ? req.body.gameType
+        : gameData.activeGame;
+
       const prize = drawPrize(originalAmountDue);
       const discount = discountFor(prize, originalAmountDue);
+
+      if (prize.kind === 'turn') {
+        // Tặng thêm 1 lượt chơi: hoàn lại 1 lượt quay cho thành viên
+        member.spinCount = Math.max(0, member.spinCount - 1);
+      }
 
       member.amountDue = Math.max(MIN_REMAINING, originalAmountDue - discount);
       await member.save();
@@ -304,7 +331,7 @@ const paymentController = {
         prizeId: prize.id,
         prizeLabel: prize.label,
         discount,
-        gameType: gameData.activeGame
+        gameType: chosenGame
       });
 
       activeDraws.set(key, {
@@ -314,7 +341,7 @@ const paymentController = {
         discountedTo: member.amountDue,
         cancelled: false,
         historyId: history._id,
-        gameType: gameData.activeGame
+        gameType: chosenGame
       });
 
       return res.status(200).json({
@@ -322,9 +349,13 @@ const paymentController = {
         data: {
           prizeId: prize.id,
           prizeLabel: prize.label,
+          prizeKind: prize.kind,
           discount,
           originalAmountDue,
-          gameType: gameData.activeGame,
+          gameType: chosenGame,
+          maxSpins,
+          spinCount: member.spinCount,
+          remainingSpins: Math.max(0, maxSpins - member.spinCount),
           member: { id: member._id, amountDue: member.amountDue },
           payment: buildPayment(member)
         }
@@ -724,6 +755,7 @@ const paymentController = {
         data: {
           mode: gameData.mode,
           manualGame: gameData.manualGame,
+          spinsPerWeek: gameData.spinsPerWeek,
           activeGame: gameData.activeGame,
           weekNo: gameData.weekNo,
           gameInfo: gameData.gameInfo,
@@ -738,19 +770,25 @@ const paymentController = {
 
   /**
    * PUT /api/payments/game-setting
-   * Admin - Cập nhật chế độ xoay tua (auto/manual) và trò chơi thủ công
+   * Admin - Cập nhật chế độ xoay tua (auto/manual), trò chơi thủ công, và số lần chơi 1 tuần
    */
   updateGameSetting: async (req, res) => {
     try {
       if (!req.user || req.user.role !== 'admin') {
         return res.status(403).json({ message: 'Không có quyền truy cập' });
       }
-      const { mode, manualGame } = req.body;
+      const { mode, manualGame, spinsPerWeek } = req.body;
       if (mode && !['auto', 'manual'].includes(mode)) {
         return res.status(400).json({ message: 'Chế độ không hợp lệ (auto hoặc manual)' });
       }
       if (manualGame && !GAME_LIST.includes(manualGame)) {
         return res.status(400).json({ message: 'Trò chơi không hợp lệ' });
+      }
+      if (spinsPerWeek !== undefined) {
+        const num = Number(spinsPerWeek);
+        if (isNaN(num) || num < 1) {
+          return res.status(400).json({ message: 'Số lượt chơi mỗi tuần phải là số từ 1 trở lên' });
+        }
       }
 
       let setting = await GameSetting.findOne();
@@ -759,6 +797,9 @@ const paymentController = {
       }
       if (mode) setting.mode = mode;
       if (manualGame) setting.manualGame = manualGame;
+      if (spinsPerWeek !== undefined) {
+        setting.spinsPerWeek = Math.floor(Number(spinsPerWeek));
+      }
       await setting.save();
 
       const gameData = await resolveActiveGame();
@@ -767,6 +808,7 @@ const paymentController = {
         data: {
           mode: gameData.mode,
           manualGame: gameData.manualGame,
+          spinsPerWeek: gameData.spinsPerWeek,
           activeGame: gameData.activeGame,
           weekNo: gameData.weekNo,
           gameInfo: gameData.gameInfo,

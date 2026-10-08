@@ -26,8 +26,10 @@ const authController = {
         return res.status(401).json({ message: 'Mật khẩu không chính xác' });
       }
 
+      const accountRole = admin.username?.toLowerCase() === 'admin' ? 'scorer' : (admin.role || 'admin');
+
       const token = jwt.sign(
-        { id: admin._id, username: admin.username, role: 'admin' },
+        { id: admin._id, username: admin.username, role: accountRole },
         config.JWT_SECRET,
         { expiresIn: config.JWT_EXPIRES }
       );
@@ -38,7 +40,8 @@ const authController = {
         admin: {
           id: admin._id,
           username: admin.username,
-          name: admin.name
+          name: admin.name,
+          role: accountRole
         }
       });
     } catch (error) {
@@ -57,7 +60,9 @@ const authController = {
       if (!admin) {
         return res.status(404).json({ message: 'Admin not found' });
       }
-      res.status(200).json({ success: true, admin });
+      const adminObj = admin.toObject();
+      adminObj.role = admin.username?.toLowerCase() === 'admin' ? 'scorer' : (admin.role || 'admin');
+      res.status(200).json({ success: true, admin: adminObj });
     } catch (error) {
       console.error('GetMe error:', error);
       res.status(500).json({ message: 'Lỗi server' });

@@ -23,10 +23,11 @@ const optionalAuthMiddleware = (req, res, next) => {
         role: 'user'
       };
     } else {
+      const resolvedRole = decoded.username === 'admin' ? 'scorer' : (decoded.role || 'admin');
       req.admin = {
         id: decoded.id,
         username: decoded.username,
-        role: 'admin'
+        role: resolvedRole
       };
       req.user = req.admin;
     }

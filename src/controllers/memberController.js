@@ -41,7 +41,10 @@ const memberController = {
    */
   create: async (req, res) => {
     try {
-      const { name, memberCode, amountDue, note, username, password } = req.body;
+      if (!req.user || req.user.role !== 'admin') {
+        return res.status(403).json({ message: 'Chỉ Admin mới có quyền thêm thành viên' });
+      }
+      const { name, memberCode, amountDue, note, username, password, customSpinsPerWeek } = req.body;
 
       if (!name || !name.trim()) {
         return res.status(400).json({ message: 'Tên thành viên là bắt buộc' });
@@ -74,6 +77,9 @@ const memberController = {
       }
 
       const initialAmount = amountDue !== undefined ? Number(amountDue) : 0;
+      const initialCustomSpins = (customSpinsPerWeek !== undefined && customSpinsPerWeek !== null && customSpinsPerWeek !== '')
+        ? Math.max(1, Number(customSpinsPerWeek))
+        : null;
       
       const member = await Member.create({
         name: name.trim(),
@@ -82,7 +88,8 @@ const memberController = {
         paymentStatus: initialAmount > 0 ? 'unpaid' : 'paid',
         note: note || '',
         username: finalUsername,
-        password: hashedPw
+        password: hashedPw,
+        customSpinsPerWeek: initialCustomSpins
       });
 
       res.status(201).json({ success: true, data: member });
@@ -186,6 +193,12 @@ const memberController = {
         member.password = await bcrypt.hash(password, salt);
       }
 
+      // Handle customSpinsPerWeek update
+      if (isAdmin && req.body.customSpinsPerWeek !== undefined) {
+        const val = req.body.customSpinsPerWeek;
+        member.customSpinsPerWeek = (val === '' || val === null) ? null : Math.max(1, Number(val));
+      }
+
       await member.save();
       res.status(200).json({ success: true, data: member });
     } catch (error) {
@@ -201,6 +214,9 @@ const memberController = {
    */
   bulkUpdate: async (req, res) => {
     try {
+      if (!req.user || req.user.role !== 'admin') {
+        return res.status(403).json({ message: 'Chỉ Admin mới có quyền cập nhật hàng loạt' });
+      }
       const { amountDue, weekLabel, isAdd } = req.body;
 
       if (amountDue === undefined) {
@@ -258,6 +274,9 @@ const memberController = {
    */
   delete: async (req, res) => {
     try {
+      if (!req.user || req.user.role !== 'admin') {
+        return res.status(403).json({ message: 'Chỉ Admin mới có quyền xóa thành viên' });
+      }
       const member = await Member.findByIdAndDelete(req.params.id);
       if (!member) {
         return res.status(404).json({ message: 'Không tìm thấy thành viên' });
@@ -275,6 +294,9 @@ const memberController = {
    */
   resetSpins: async (req, res) => {
     try {
+      if (!req.user || req.user.role !== 'admin') {
+        return res.status(403).json({ message: 'Chỉ Admin mới có quyền reset lượt quay' });
+      }
       const member = await Member.findById(req.params.id);
       if (!member) {
         return res.status(404).json({ message: 'Không tìm thấy thành viên' });
