@@ -11,6 +11,7 @@ const configureRoutes = (app) => {
   api.use('/posts', require('./postRoutes'));
   api.use('/comments', require('./comments'));
   api.use('/fee-config', require('./feeConfigRoutes'));
+  api.use('/popup-config', require('./popupConfigRoutes'));
   api.use('/tournament', require('./tournamentRoutes'));
 
   // 404 handler for API routes
